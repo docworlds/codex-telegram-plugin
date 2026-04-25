@@ -1,6 +1,9 @@
 # Telegram Communicator for Codex
 
-This local Codex plugin starts `@mseep/mcp-communicator-telegram` as an MCP server.
+This local Codex plugin provides two Telegram integrations:
+
+- a Codex MCP server for outbound notifications, questions, and file sharing
+- an optional local bridge daemon that lets you send a Telegram message to the bot and receive a `codex exec` response
 
 ## Setup
 
@@ -34,7 +37,68 @@ CHAT_ID=your_chat_id_here
 To discover `CHAT_ID` manually, set `TELEGRAM_TOKEN` first and run:
 
 ```bash
-/home/wingu/plugins/telegram-communicator/scripts/get-chat-id.sh
+~/plugins/telegram-communicator/scripts/get-chat-id.sh
 ```
 
 Then send a message to your bot and copy the printed chat ID.
+
+## Remote Control Bridge
+
+Start the bridge:
+
+```bash
+~/plugins/telegram-communicator/scripts/start-telegram-agent.sh
+```
+
+Stop it:
+
+```bash
+~/plugins/telegram-communicator/scripts/stop-telegram-agent.sh
+```
+
+Check status:
+
+```bash
+~/plugins/telegram-communicator/scripts/status-telegram-agent.sh
+```
+
+Once running, send a text message to your bot. The bridge only accepts messages from the configured `CHAT_ID`, runs:
+
+```bash
+codex exec resume --full-auto --skip-git-repo-check "$BOUND_CODEX_SESSION_ID" -
+```
+
+and replies with the final Codex response.
+
+Bind the currently open Codex session before using Telegram remote prompts:
+
+```bash
+~/plugins/telegram-communicator/scripts/bind-current-session.sh
+~/plugins/telegram-communicator/scripts/start-telegram-agent.sh
+```
+
+The bridge uses `CODEX_THREAD_ID` when available. If you are binding from outside Codex, pass the session id manually:
+
+```bash
+~/plugins/telegram-communicator/scripts/bind-current-session.sh 019dc221-...
+```
+
+Telegram commands:
+
+- `/help` shows usage
+- `/status` shows bridge state
+- `/pwd` shows the active working directory
+- `/cd <path>` changes the working directory
+- `/args` shows the Codex exec arguments
+- `/session` shows the bound Codex session id
+- `/sessions` shows registered sessions with clickable Telegram buttons
+- `/use <number|sessionId>` selects the active session by text command
+- `/where` shows the active session
+
+Optional env values can be added to `~/.codex/telegram-mcp.env`:
+
+```bash
+TELEGRAM_AGENT_WORKDIR=/path/to/project
+TELEGRAM_AGENT_MODEL=gpt-5.5
+TELEGRAM_AGENT_CODEX_ARGS="--full-auto --skip-git-repo-check"
+```

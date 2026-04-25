@@ -45,48 +45,50 @@ prompt_token() {
 }
 
 discover_chat_id() {
-  node <<'NODE'
-const https = require("https");
-const token = process.env.TELEGRAM_TOKEN;
-const url = `https://api.telegram.org/bot${token}/getUpdates?timeout=5&limit=20`;
+  if [ -z "${TELEGRAM_TOKEN:-}" ]; then
+    echo "TELEGRAM_TOKEN is not set." >&2
+    return 1
+  fi
 
-https
-  .get(url, (res) => {
-    let body = "";
-    res.on("data", (chunk) => {
-      body += chunk;
-    });
-    res.on("end", () => {
-      try {
-        const parsed = JSON.parse(body);
-        if (!parsed.ok) {
-          console.error(parsed.description || "Telegram API returned an error.");
-          process.exit(1);
-        }
+  local response
+  if ! response="$(curl -fsS --connect-timeout 10 --max-time 20 \
+    "https://api.telegram.org/bot${TELEGRAM_TOKEN}/getUpdates?timeout=5&limit=50" 2>&1)"; then
+    printf '%s\n' "${response:-curl failed before returning an error message.}" >&2
+    return 1
+  fi
 
-        const updates = Array.isArray(parsed.result) ? parsed.result.slice().reverse() : [];
-        for (const update of updates) {
-          const message =
-            update.message ||
-            update.channel_post ||
-            update.edited_message ||
-            update.edited_channel_post;
-          if (message && message.chat && message.chat.id) {
-            console.log(String(message.chat.id));
-            return;
-          }
-        }
-        process.exit(2);
-      } catch (error) {
-        console.error(error.message);
-        process.exit(1);
-      }
-    });
-  })
-  .on("error", (error) => {
-    console.error(error.message);
+  TELEGRAM_UPDATES_JSON="$response" node <<'NODE'
+try {
+  const parsed = JSON.parse(process.env.TELEGRAM_UPDATES_JSON || "{}");
+  if (!parsed.ok) {
+    console.error(parsed.description || "Telegram API returned an error.");
     process.exit(1);
-  });
+  }
+
+  const updates = Array.isArray(parsed.result) ? parsed.result.slice().reverse() : [];
+  for (const update of updates) {
+    const candidates = [
+      update.message,
+      update.channel_post,
+      update.edited_message,
+      update.edited_channel_post,
+      update.callback_query && update.callback_query.message,
+      update.my_chat_member,
+      update.chat_member,
+    ];
+
+    for (const candidate of candidates) {
+      if (candidate && candidate.chat && candidate.chat.id) {
+        console.log(String(candidate.chat.id));
+        process.exit(0);
+      }
+    }
+  }
+  process.exit(2);
+} catch (error) {
+  console.error(error && error.message ? error.message : "Could not parse Telegram response.");
+  process.exit(1);
+}
 NODE
 }
 
