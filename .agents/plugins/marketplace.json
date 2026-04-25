@@ -1,0 +1,20 @@
+{
+  "name": "codex-telegram-plugin",
+  "interface": {
+    "displayName": "Codex Telegram Plugin"
+  },
+  "plugins": [
+    {
+      "name": "telegram-communicator",
+      "source": {
+        "source": "local",
+        "path": "./plugins/telegram-communicator"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

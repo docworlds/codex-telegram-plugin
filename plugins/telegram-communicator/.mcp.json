@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "telegram-communicator": {
+      "command": "bash",
+      "args": [
+        "-lc",
+        "set -euo pipefail; env_file=\"${TELEGRAM_MCP_ENV_FILE:-$HOME/.codex/telegram-mcp.env}\"; if [ -f \"$env_file\" ]; then set -a; . \"$env_file\"; set +a; fi; if [ -z \"${TELEGRAM_TOKEN:-}\" ] || [ -z \"${CHAT_ID:-}\" ]; then echo \"Telegram Communicator is not configured. Run /telegram-setup first.\" >&2; exit 1; fi; exec npx -y @mseep/mcp-communicator-telegram"
+      ],
+      "note": "Loads Telegram credentials from ~/.codex/telegram-mcp.env, then starts @mseep/mcp-communicator-telegram."
+    }
+  }
+}
