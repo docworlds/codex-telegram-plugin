@@ -21,19 +21,55 @@ if (!TELEGRAM_TOKEN || !CHAT_ID) {
 }
 
 let busy = false;
+let stateMtimeMs = 0;
 let state = loadState();
 
 function loadState() {
   try {
+    const stat = fs.statSync(STATE_FILE);
+    stateMtimeMs = stat.mtimeMs;
     return JSON.parse(fs.readFileSync(STATE_FILE, "utf8"));
   } catch {
     return { offset: 0, workdir: WORKDIR };
   }
 }
 
+function reloadState() {
+  try {
+    const stat = fs.statSync(STATE_FILE);
+    if (stat.mtimeMs <= stateMtimeMs) {
+      return;
+    }
+    state = JSON.parse(fs.readFileSync(STATE_FILE, "utf8"));
+    stateMtimeMs = stat.mtimeMs;
+  } catch {
+    state = { ...state, offset: state.offset || 0, workdir: state.workdir || WORKDIR };
+  }
+}
+
 function saveState() {
+  let latest = {};
+  let latestMtimeMs = 0;
+  try {
+    latestMtimeMs = fs.statSync(STATE_FILE).mtimeMs;
+    latest = JSON.parse(fs.readFileSync(STATE_FILE, "utf8"));
+  } catch {}
+  if (latestMtimeMs > stateMtimeMs) {
+    state.sessions = latest.sessions || state.sessions;
+    state.activeSessionId = latest.activeSessionId || state.activeSessionId;
+    state.sessionId = latest.sessionId || state.sessionId;
+    state.workdir = latest.workdir || state.workdir || WORKDIR;
+  } else {
+    state.sessions = state.sessions || latest.sessions;
+    state.activeSessionId = state.activeSessionId || latest.activeSessionId;
+    state.sessionId = state.sessionId || latest.sessionId;
+    state.workdir = state.workdir || latest.workdir || WORKDIR;
+  }
   fs.mkdirSync(path.dirname(STATE_FILE), { recursive: true });
   fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2), { mode: 0o600 });
+  try {
+    stateMtimeMs = fs.statSync(STATE_FILE).mtimeMs;
+  } catch {}
 }
 
 function curl(args, options = {}) {
@@ -349,7 +385,9 @@ async function loop() {
   console.error(`telegram-agent started. chat=${CHAT_ID} workdir=${state.workdir || WORKDIR}`);
   while (true) {
     try {
+      reloadState();
       const updates = await getUpdates();
+      reloadState();
       for (const update of updates) {
         if (typeof update.update_id === "number") {
           state.offset = update.update_id + 1;
