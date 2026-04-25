@@ -70,19 +70,18 @@ codex exec resume "$BOUND_CODEX_SESSION_ID" --full-auto --skip-git-repo-check -
 
 and replies with the final Codex response.
 
-Bind the currently open Codex session before using Telegram remote prompts:
+Bind the currently open Codex session before using Telegram remote prompts.
 
-In Codex TUI, run:
+In Codex TUI, send this as a normal message, without a leading slash:
 
 ```text
-/telegram-bind
+telegram-bind
 ```
 
-or run the script manually:
+Codex currently treats unknown `/...` input as built-in slash commands before plugin or skill handling, so `/telegram-bind` is not supported in the TUI. You can also run the shell helper manually:
 
 ```bash
-~/plugins/telegram-communicator/scripts/bind-current-session.sh
-~/plugins/telegram-communicator/scripts/start-telegram-agent.sh
+telegram-bind
 ```
 
 Only one Codex session is bound at a time. Binding a new session replaces the previous binding.
