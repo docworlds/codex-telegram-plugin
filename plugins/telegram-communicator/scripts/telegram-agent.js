@@ -331,6 +331,7 @@ async function handleMessage(message) {
     activity: "Codex 시작 중",
     detail: "",
     lastEventAt: Date.now(),
+    lastNotifiedActivity: "",
   };
   await sendMessage("Codex 작업을 시작합니다.", message.message_id);
   try {
@@ -367,6 +368,19 @@ function formatStatus(session) {
   ].filter(Boolean).join("\n");
 }
 
+function formatActivityTransition() {
+  if (!currentTask) {
+    return "";
+  }
+  return [
+    "Codex 작업 전환",
+    `경과: ${formatElapsed(Date.now() - currentTask.startedAt)}`,
+    `현재: ${currentTask.activity || "작업 중"}`,
+    currentTask.detail ? `파일/명령: ${truncate(currentTask.detail, 160)}` : null,
+    `작업: "${truncate(currentTask.prompt, 180)}"`,
+  ].filter(Boolean).join("\n");
+}
+
 function formatElapsed(ms) {
   const totalSeconds = Math.max(0, Math.floor(ms / 1000));
   const minutes = Math.floor(totalSeconds / 60);
@@ -386,9 +400,38 @@ function updateActivity(activity, detail) {
   if (!currentTask) {
     return;
   }
+  const previousActivity = currentTask.activity;
   currentTask.activity = activity || currentTask.activity;
   currentTask.detail = detail || currentTask.detail || "";
   currentTask.lastEventAt = Date.now();
+  maybeNotifyActivityTransition(previousActivity);
+}
+
+function maybeNotifyActivityTransition(previousActivity) {
+  if (!currentTask || !currentTask.activity) {
+    return;
+  }
+  if (currentTask.activity === previousActivity || currentTask.activity === currentTask.lastNotifiedActivity) {
+    return;
+  }
+  if (!isMajorActivity(currentTask.activity)) {
+    return;
+  }
+  currentTask.lastNotifiedActivity = currentTask.activity;
+  sendMessage(formatActivityTransition()).catch((error) => {
+    console.error(`activity transition notification failed: ${error.message}`);
+  });
+}
+
+function isMajorActivity(activity) {
+  return [
+    "작업 준비 중",
+    "명령 실행 중",
+    "웹 검색 중",
+    "파일 수정 중",
+    "모델 응답 생성 중",
+    "최종 응답 정리 중",
+  ].includes(activity);
 }
 
 function handleCodexEvent(line) {
