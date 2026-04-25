@@ -30,11 +30,7 @@ const session = {
   label: process.env.LABEL || process.env.SESSION_ID,
   updatedAt: now,
 };
-state.sessions = Array.isArray(state.sessions)
-  ? state.sessions.filter((item) => item && item.id !== session.id)
-  : [];
-state.sessions.unshift(session);
-state.sessions = state.sessions.slice(0, 20);
+state.sessions = [session];
 state.activeSessionId = session.id;
 state.sessionId = session.id;
 state.workdir = process.env.WORKDIR;

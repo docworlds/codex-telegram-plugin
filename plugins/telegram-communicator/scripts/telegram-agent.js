@@ -153,7 +153,7 @@ function sessionLabel(session, index) {
 function sessionsText() {
   const sessions = Array.isArray(state.sessions) ? state.sessions : [];
   if (!sessions.length) {
-    return "등록된 Codex 세션이 없습니다. 연결할 Codex 세션 안에서 bind-current-session.sh를 실행하세요.";
+    return "등록된 Codex 세션이 없습니다. 연결할 Codex 세션에서 /telegram-bind를 실행하세요.";
   }
   const active = activeSession();
   return [
@@ -161,7 +161,7 @@ function sessionsText() {
     "",
     ...sessions.map((session, index) => `${active && active.id === session.id ? "*" : " "} ${sessionLabel(session, index)}\n   ${session.workdir || ""}`),
     "",
-    "아래 버튼을 눌러 활성 세션을 선택하세요.",
+    "새 Codex 세션에서 /telegram-bind를 실행하면 기존 바인딩은 자동으로 교체됩니다.",
   ].join("\n");
 }
 
@@ -188,8 +188,7 @@ function helpText() {
     "/cd <path> - 작업 디렉터리 변경",
     "/args - Codex 실행 인자 확인",
     "/session - 바인딩된 Codex 세션 확인",
-    "/sessions - 등록된 세션 버튼 목록",
-    "/use <번호|sessionId> - 활성 세션 선택",
+    "/sessions - 현재 등록된 단일 세션 확인",
     "/where - 현재 활성 세션 확인",
   ].join("\n");
 }
@@ -257,23 +256,6 @@ async function handleMessage(message) {
       replyTo: message.message_id,
       replyMarkup: sessionsKeyboard(),
     });
-    return;
-  }
-
-  if (text.startsWith("/use ")) {
-    const query = text.slice(5).trim();
-    const sessions = Array.isArray(state.sessions) ? state.sessions : [];
-    const byIndex = /^\d+$/.test(query) ? sessions[Number(query) - 1] : null;
-    const session = byIndex || sessions.find((item) => item && item.id.startsWith(query));
-    if (!session) {
-      await sendMessage("세션을 찾을 수 없습니다. /sessions로 목록을 확인하세요.", message.message_id);
-      return;
-    }
-    state.activeSessionId = session.id;
-    state.sessionId = session.id;
-    state.workdir = session.workdir || state.workdir || WORKDIR;
-    saveState();
-    await sendMessage(`활성 세션 변경됨:\n${session.label || session.id}\n${session.id}`, message.message_id);
     return;
   }
 

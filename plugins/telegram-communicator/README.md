@@ -65,17 +65,27 @@ Check status:
 Once running, send a text message to your bot. The bridge only accepts messages from the configured `CHAT_ID`, runs:
 
 ```bash
-codex exec resume --full-auto --skip-git-repo-check "$BOUND_CODEX_SESSION_ID" -
+codex exec resume "$BOUND_CODEX_SESSION_ID" --full-auto --skip-git-repo-check -
 ```
 
 and replies with the final Codex response.
 
 Bind the currently open Codex session before using Telegram remote prompts:
 
+In Codex TUI, run:
+
+```text
+/telegram-bind
+```
+
+or run the script manually:
+
 ```bash
 ~/plugins/telegram-communicator/scripts/bind-current-session.sh
 ~/plugins/telegram-communicator/scripts/start-telegram-agent.sh
 ```
+
+Only one Codex session is bound at a time. Binding a new session replaces the previous binding.
 
 The bridge uses `CODEX_THREAD_ID` when available. If you are binding from outside Codex, pass the session id manually:
 
@@ -91,8 +101,7 @@ Telegram commands:
 - `/cd <path>` changes the working directory
 - `/args` shows the Codex exec arguments
 - `/session` shows the bound Codex session id
-- `/sessions` shows registered sessions with clickable Telegram buttons
-- `/use <number|sessionId>` selects the active session by text command
+- `/sessions` shows the currently registered session
 - `/where` shows the active session
 
 Optional env values can be added to `~/.codex/telegram-mcp.env`:
