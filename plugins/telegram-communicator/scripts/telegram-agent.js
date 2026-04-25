@@ -23,6 +23,7 @@ if (!TELEGRAM_TOKEN || !CHAT_ID) {
 let busy = false;
 let stateMtimeMs = 0;
 let state = loadState();
+let currentTask = null;
 
 function loadState() {
   try {
@@ -219,7 +220,7 @@ function helpText() {
     "",
     "Commands:",
     "/help - 도움말",
-    "/status - 상태 확인",
+    "/status - 상태 및 현재 작업 확인",
     "/pwd - 현재 작업 디렉터리",
     "/cd <path> - 작업 디렉터리 변경",
     "/args - Codex 실행 인자 확인",
@@ -277,7 +278,7 @@ async function handleMessage(message) {
 
   if (text === "/status") {
     const session = activeSession();
-    await sendMessage(`ready=${!busy}\nmode=${session ? "resume" : "new-exec"}\nsession=${session ? session.id : "(not bound)"}\nlabel=${session ? session.label || "" : ""}\nworkdir=${session ? session.workdir || "" : state.workdir || WORKDIR}\nmodel=${MODEL || "config default"}`, message.message_id);
+    await sendMessage(formatStatus(session), message.message_id);
     return;
   }
 
@@ -323,6 +324,14 @@ async function handleMessage(message) {
   }
 
   busy = true;
+  currentTask = {
+    prompt: text,
+    startedAt: Date.now(),
+    session: activeSession(),
+    activity: "Codex 시작 중",
+    detail: "",
+    lastEventAt: Date.now(),
+  };
   await sendMessage("Codex 작업을 시작합니다.", message.message_id);
   try {
     const answer = await runCodex(text);
@@ -331,7 +340,107 @@ async function handleMessage(message) {
     await sendMessage(`Codex 실행 실패:\n${error.message}`, message.message_id);
   } finally {
     busy = false;
+    currentTask = null;
   }
+}
+
+function formatStatus(session) {
+  if (!busy || !currentTask) {
+    return [
+      "Codex 대기 중",
+      `ready=true`,
+      `session=${session ? session.id : "(not bound)"}`,
+      `label=${session ? session.label || "" : ""}`,
+      `workdir=${session ? session.workdir || "" : state.workdir || WORKDIR}`,
+      `model=${MODEL || "config default"}`,
+    ].join("\n");
+  }
+
+  return [
+    "Codex 작업 진행 중",
+    `경과: ${formatElapsed(Date.now() - currentTask.startedAt)}`,
+    `현재: ${currentTask.activity || "작업 중"}`,
+    currentTask.detail ? `파일/명령: ${truncate(currentTask.detail, 160)}` : null,
+    `세션: ${currentTask.session ? `${currentTask.session.label || ""} (${currentTask.session.id.slice(0, 8)})` : "(not bound)"}`,
+    `작업: "${truncate(currentTask.prompt, 180)}"`,
+    `최근 활동: ${formatElapsed(Date.now() - currentTask.lastEventAt)} 전`,
+  ].filter(Boolean).join("\n");
+}
+
+function formatElapsed(ms) {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  if (minutes <= 0) {
+    return `${seconds}초`;
+  }
+  return seconds ? `${minutes}분 ${seconds}초` : `${minutes}분`;
+}
+
+function truncate(value, maxLength) {
+  const text = String(value || "").replace(/\s+/g, " ").trim();
+  return text.length > maxLength ? `${text.slice(0, maxLength - 1)}…` : text;
+}
+
+function updateActivity(activity, detail) {
+  if (!currentTask) {
+    return;
+  }
+  currentTask.activity = activity || currentTask.activity;
+  currentTask.detail = detail || currentTask.detail || "";
+  currentTask.lastEventAt = Date.now();
+}
+
+function handleCodexEvent(line) {
+  let event;
+  try {
+    event = JSON.parse(line);
+  } catch {
+    return false;
+  }
+
+  const type = event.type || event.msg || event.event;
+  const payload = event.payload || event;
+  if (type === "exec_command_begin" || type === "ExecCommandBegin") {
+    const cmd = payload.command || payload.cmd || payload.parsed_cmd;
+    updateActivity("명령 실행 중", Array.isArray(cmd) ? cmd.join(" ") : JSON.stringify(cmd || ""));
+    return true;
+  }
+  if (type === "exec_command_end" || type === "ExecCommandEnd") {
+    const cmd = payload.command || payload.cmd || payload.parsed_cmd;
+    const status = payload.exit_code === 0 || payload.status === "completed" ? "명령 완료" : "명령 종료";
+    updateActivity(status, Array.isArray(cmd) ? cmd.join(" ") : JSON.stringify(cmd || ""));
+    return true;
+  }
+  if (type === "web_search_begin" || type === "WebSearchBegin") {
+    updateActivity("웹 검색 중", JSON.stringify(payload.query || payload.queries || ""));
+    return true;
+  }
+  if (type === "web_search_end" || type === "WebSearchEnd") {
+    updateActivity("웹 검색 완료", JSON.stringify(payload.query || payload.queries || ""));
+    return true;
+  }
+  if (type === "patch_apply_begin" || type === "PatchApplyBegin") {
+    updateActivity("파일 수정 중", "apply_patch");
+    return true;
+  }
+  if (type === "patch_apply_end" || type === "PatchApplyEnd") {
+    updateActivity("파일 수정 완료", "apply_patch");
+    return true;
+  }
+  if (type === "agent_message_delta" || type === "AgentMessageDelta" || type === "agent_message" || type === "AgentMessage") {
+    updateActivity("모델 응답 생성 중", "");
+    return true;
+  }
+  if (type === "turn_started" || type === "TurnStarted") {
+    updateActivity("작업 준비 중", "");
+    return true;
+  }
+  if (type === "turn_complete" || type === "TurnComplete") {
+    updateActivity("최종 응답 정리 중", "");
+    return true;
+  }
+  return false;
 }
 
 function runCodex(prompt) {
@@ -339,8 +448,8 @@ function runCodex(prompt) {
     const outputFile = path.join(os.tmpdir(), `telegram-codex-${Date.now()}.txt`);
     const session = activeSession();
     const args = session
-      ? ["exec", "resume", ...CODEX_ARGS, "-o", outputFile, session.id]
-      : ["exec", ...CODEX_ARGS, "-C", state.workdir || WORKDIR, "-o", outputFile];
+      ? ["exec", "resume", ...CODEX_ARGS, "--json", "-o", outputFile, session.id]
+      : ["exec", ...CODEX_ARGS, "--json", "-C", state.workdir || WORKDIR, "-o", outputFile];
     if (MODEL) {
       args.push("-m", MODEL);
     }
@@ -354,8 +463,18 @@ function runCodex(prompt) {
 
     let stdout = "";
     let stderr = "";
+    let stdoutBuffer = "";
     child.stdout.on("data", (chunk) => {
-      stdout += chunk.toString();
+      const text = chunk.toString();
+      stdout += text;
+      stdoutBuffer += text;
+      const lines = stdoutBuffer.split(/\r?\n/);
+      stdoutBuffer = lines.pop() || "";
+      for (const line of lines) {
+        if (line.trim()) {
+          handleCodexEvent(line);
+        }
+      }
     });
     child.stderr.on("data", (chunk) => {
       stderr += chunk.toString();
