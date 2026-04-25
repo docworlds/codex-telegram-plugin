@@ -20,7 +20,7 @@ function curl(args, options = {}) {
     const safeArgs = [];
     let configFile = null;
     for (const arg of args) {
-      if (typeof arg === "string" && arg.startsWith("https://api.telegram.org/bot")) {
+      if (typeof arg === "string" && arg.includes(TELEGRAM_TOKEN)) {
         configFile = path.join(os.tmpdir(), `telegram-curl-${process.pid}-${Date.now()}.conf`);
         fs.writeFileSync(configFile, `url = "${arg.replace(/"/g, '\\"')}"\n`, { mode: 0o600 });
         safeArgs.push("--config", configFile);
@@ -170,16 +170,56 @@ async function sendFile({ filePath }) {
   if (!fs.existsSync(resolved) || !fs.statSync(resolved).isFile()) {
     throw new Error(`File not found: ${resolved}`);
   }
+  await sendDocument(resolved);
+}
+
+async function sendDocument(filePath, caption) {
   const raw = await curl([
     "-X", "POST",
     "-F", `chat_id=${CHAT_ID}`,
-    "-F", `document=@${resolved}`,
+    "-F", `document=@${filePath}`,
+    ...(caption ? ["-F", `caption=${String(caption).slice(0, 1024)}`] : []),
     apiUrl("sendDocument"),
   ], { maxTime: 120, maxBuffer: 20 * 1024 * 1024 });
   const parsed = JSON.parse(raw);
   if (!parsed.ok) {
     throw new Error(parsed.description || "Telegram sendDocument failed");
   }
+}
+
+async function sendImage({ filePath, caption } = {}) {
+  if (!filePath) {
+    throw new Error("filePath is required");
+  }
+  const resolved = path.resolve(filePath);
+  if (!fs.existsSync(resolved) || !fs.statSync(resolved).isFile()) {
+    throw new Error(`File not found: ${resolved}`);
+  }
+  if (!isImagePath(resolved)) {
+    throw new Error(`Not a supported image file: ${resolved}`);
+  }
+
+  const fields = [
+    "-X", "POST",
+    "-F", `chat_id=${CHAT_ID}`,
+    "-F", `photo=@${resolved}`,
+  ];
+  if (caption) {
+    fields.push("-F", `caption=${String(caption).slice(0, 1024)}`);
+  }
+  try {
+    const raw = await curl([...fields, apiUrl("sendPhoto")], { maxTime: 120, maxBuffer: 20 * 1024 * 1024 });
+    const parsed = JSON.parse(raw);
+    if (!parsed.ok) {
+      throw new Error(parsed.description || "Telegram sendPhoto failed");
+    }
+  } catch {
+    await sendDocument(resolved, caption);
+  }
+}
+
+function isImagePath(filePath) {
+  return /\.(avif|bmp|gif|heic|heif|jpe?g|png|tiff?|webp)$/i.test(filePath);
 }
 
 async function zipProject({ directory } = {}) {
@@ -244,6 +284,18 @@ const tools = [
     },
   },
   {
+    name: "send_image",
+    description: "Send an image to the user via Telegram",
+    inputSchema: {
+      type: "object",
+      properties: {
+        filePath: { type: "string", description: "Path of the image file to send" },
+        caption: { type: "string", description: "Optional image caption" },
+      },
+      required: ["filePath"],
+    },
+  },
+  {
     name: "zip_project",
     description: "Create a project archive and send it to the user via Telegram",
     inputSchema: {
@@ -299,6 +351,9 @@ async function handle(request) {
         } else if (name === "send_file") {
           await sendFile(args);
           result(request.id, { content: [{ type: "text", text: "File sent successfully" }] });
+        } else if (name === "send_image") {
+          await sendImage(args);
+          result(request.id, { content: [{ type: "text", text: "Image sent successfully" }] });
         } else if (name === "zip_project") {
           await zipProject(args);
           result(request.id, { content: [{ type: "text", text: "Project archive sent successfully" }] });

@@ -3,6 +3,7 @@
 This local Codex plugin provides two Telegram integrations:
 
 - a Codex MCP server for outbound notifications, questions, and file sharing
+- image sending through the MCP server with `send_image`
 - an optional local bridge daemon that lets you send a Telegram message to the bot and receive a `codex exec` response
 
 ## Setup
@@ -62,13 +63,15 @@ Check status:
 ~/plugins/telegram-communicator/scripts/status-telegram-agent.sh
 ```
 
-Once running, send a text message to your bot. The bridge only accepts messages from the configured `CHAT_ID`, runs:
+Once running, send a text message or image to your bot. The bridge only accepts messages from the configured `CHAT_ID`, runs:
 
 ```bash
-codex exec resume "$BOUND_CODEX_SESSION_ID" --full-auto --skip-git-repo-check -
+codex --sandbox danger-full-access --ask-for-approval never exec resume --skip-git-repo-check "$BOUND_CODEX_SESSION_ID" -
 ```
 
 and replies with the final Codex response.
+
+When you send an image, the bridge downloads the largest Telegram photo variant, or an image document, into `~/.codex/telegram-images` and passes it to Codex with `--image`. Telegram image captions are used as the prompt text; if there is no caption, Codex is asked to inspect the image.
 
 Bind the currently open Codex session before using Telegram remote prompts.
 
@@ -108,5 +111,7 @@ Optional env values can be added to `~/.codex/telegram-mcp.env`:
 ```bash
 TELEGRAM_AGENT_WORKDIR=/path/to/project
 TELEGRAM_AGENT_MODEL=gpt-5.5
-TELEGRAM_AGENT_CODEX_ARGS="--full-auto --skip-git-repo-check"
+TELEGRAM_AGENT_CODEX_GLOBAL_ARGS="--sandbox danger-full-access --ask-for-approval never"
+TELEGRAM_AGENT_CODEX_ARGS="--skip-git-repo-check"
+TELEGRAM_AGENT_IMAGE_DIR=/path/to/save/telegram-images
 ```

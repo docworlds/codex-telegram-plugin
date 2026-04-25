@@ -1,7 +1,7 @@
 {
   "name": "telegram-communicator",
   "version": "0.1.0",
-  "description": "Use Telegram from Codex for notifications, questions, file sharing, and inbound Codex control from Telegram.",
+  "description": "Use Telegram from Codex for notifications, questions, file and image sharing, and inbound Codex control from Telegram.",
   "author": {
     "name": "Local",
     "url": "https://github.com/qpd-v/mcp-communicator-telegram"
@@ -20,7 +20,7 @@
   "interface": {
     "displayName": "Telegram Communicator",
     "shortDescription": "Use Telegram for Codex notifications and remote prompts",
-    "longDescription": "Adds a Telegram MCP server for asking questions, sending notifications, sharing files, and sending project archives, plus an optional local bridge daemon that forwards Telegram messages to Codex exec and returns the result.",
+    "longDescription": "Adds a Telegram MCP server for asking questions, sending notifications, sharing files and images, and sending project archives, plus an optional local bridge daemon that forwards Telegram messages and images to Codex exec and returns the result.",
     "developerName": "Local",
     "category": "Productivity",
     "capabilities": [

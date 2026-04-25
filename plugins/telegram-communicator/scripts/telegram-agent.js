@@ -10,8 +10,12 @@ const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
 const CHAT_ID = String(process.env.CHAT_ID || "");
 const STATE_FILE = process.env.TELEGRAM_AGENT_STATE_FILE || path.join(os.homedir(), ".codex", "telegram-agent-state.json");
 const WORKDIR = process.env.TELEGRAM_AGENT_WORKDIR || os.homedir();
+const IMAGE_DIR = process.env.TELEGRAM_AGENT_IMAGE_DIR || path.join(os.homedir(), ".codex", "telegram-images");
 const MODEL = process.env.TELEGRAM_AGENT_MODEL || "";
-const CODEX_ARGS = (process.env.TELEGRAM_AGENT_CODEX_ARGS || "--full-auto --skip-git-repo-check")
+const CODEX_GLOBAL_ARGS = (process.env.TELEGRAM_AGENT_CODEX_GLOBAL_ARGS || "--sandbox danger-full-access --ask-for-approval never")
+  .split(/\s+/)
+  .filter(Boolean);
+const CODEX_ARGS = (process.env.TELEGRAM_AGENT_CODEX_ARGS || "--skip-git-repo-check")
   .split(/\s+/)
   .filter(Boolean);
 
@@ -78,7 +82,7 @@ function curl(args, options = {}) {
     const safeArgs = [];
     let configFile = null;
     for (const arg of args) {
-      if (typeof arg === "string" && arg.startsWith("https://api.telegram.org/bot")) {
+      if (typeof arg === "string" && arg.includes(TELEGRAM_TOKEN)) {
         configFile = path.join(os.tmpdir(), `telegram-curl-${process.pid}-${Date.now()}.conf`);
         fs.writeFileSync(configFile, `url = "${arg.replace(/"/g, '\\"')}"\n`, { mode: 0o600 });
         safeArgs.push("--config", configFile);
@@ -175,6 +179,82 @@ function messageFromUpdate(update) {
   return update.message || update.edited_message || null;
 }
 
+function imageRefsFromMessage(message) {
+  const refs = [];
+  if (Array.isArray(message.photo) && message.photo.length) {
+    const photo = message.photo.reduce((best, item) => {
+      const bestScore = (best.file_size || 0) || ((best.width || 0) * (best.height || 0));
+      const itemScore = (item.file_size || 0) || ((item.width || 0) * (item.height || 0));
+      return itemScore > bestScore ? item : best;
+    }, message.photo[0]);
+    refs.push({ fileId: photo.file_id, fileName: `telegram-photo-${message.message_id}.jpg`, source: "photo" });
+  }
+
+  const document = message.document;
+  if (document && isImageDocument(document)) {
+    refs.push({
+      fileId: document.file_id,
+      fileName: document.file_name || `telegram-image-${message.message_id}`,
+      source: "document",
+    });
+  }
+  return refs.filter((ref) => ref.fileId);
+}
+
+function isImageDocument(document) {
+  if (document.mime_type && document.mime_type.startsWith("image/")) {
+    return true;
+  }
+  return /\.(avif|bmp|gif|heic|heif|jpe?g|png|tiff?|webp)$/i.test(document.file_name || "");
+}
+
+async function downloadMessageImages(message) {
+  const refs = imageRefsFromMessage(message);
+  const downloads = [];
+  for (let index = 0; index < refs.length; index += 1) {
+    downloads.push(await downloadTelegramImage(refs[index], message, index));
+  }
+  return downloads;
+}
+
+async function downloadTelegramImage(ref, message, index) {
+  const file = await telegram("getFile", { file_id: ref.fileId }, { maxTime: 30 });
+  if (!file || !file.file_path) {
+    throw new Error(`Telegram file path not found for ${ref.source}`);
+  }
+
+  fs.mkdirSync(IMAGE_DIR, { recursive: true, mode: 0o700 });
+  const ext = imageExtension(file.file_path, ref.fileName);
+  const base = sanitizeFileBase(path.basename(ref.fileName || ref.source, path.extname(ref.fileName || ""))) || ref.source;
+  const filename = `${Date.now()}-${message.message_id}-${index + 1}-${base}${ext}`;
+  const destination = path.join(IMAGE_DIR, filename);
+  await curl([
+    "-o", destination,
+    `https://api.telegram.org/file/bot${TELEGRAM_TOKEN}/${file.file_path}`,
+  ], { maxTime: 120, maxBuffer: 1024 * 1024 });
+  try {
+    fs.chmodSync(destination, 0o600);
+  } catch {}
+  return destination;
+}
+
+function imageExtension(...values) {
+  for (const value of values) {
+    const ext = path.extname(String(value || "")).toLowerCase();
+    if (/^\.(avif|bmp|gif|heic|heif|jpeg|jpg|png|tif|tiff|webp)$/.test(ext)) {
+      return ext;
+    }
+  }
+  return ".jpg";
+}
+
+function sanitizeFileBase(value) {
+  return String(value || "")
+    .replace(/[^A-Za-z0-9._-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80);
+}
+
 function activeSession() {
   const id = state.activeSessionId || state.sessionId;
   const sessions = Array.isArray(state.sessions) ? state.sessions : [];
@@ -227,6 +307,8 @@ function helpText() {
     "/session - 바인딩된 Codex 세션 확인",
     "/sessions - 현재 등록된 단일 세션 확인",
     "/where - 현재 활성 세션 확인",
+    "",
+    "이미지를 보내면 caption 텍스트와 함께 Codex에 첨부합니다.",
   ].join("\n");
 }
 
@@ -265,30 +347,32 @@ async function handleMessage(message) {
     return;
   }
 
-  const text = (message.text || "").trim();
-  if (!text) {
-    await sendMessage("텍스트 메시지만 처리할 수 있습니다.", message.message_id);
+  const text = (message.text || message.caption || "").trim();
+  const imageRefs = imageRefsFromMessage(message);
+  const hasImages = imageRefs.length > 0;
+  if (!text && !hasImages) {
+    await sendMessage("텍스트나 이미지 메시지만 처리할 수 있습니다.", message.message_id);
     return;
   }
 
-  if (text === "/start" || text === "/help") {
+  if (!hasImages && (text === "/start" || text === "/help")) {
     await sendMessage(helpText(), message.message_id);
     return;
   }
 
-  if (text === "/status") {
+  if (!hasImages && text === "/status") {
     const session = activeSession();
     await sendMessage(formatStatus(session), message.message_id);
     return;
   }
 
-  if (text === "/session" || text === "/where") {
+  if (!hasImages && (text === "/session" || text === "/where")) {
     const session = activeSession();
     await sendMessage(session ? `활성 세션:\n${session.label || ""}\n${session.id}\n${session.workdir || ""}` : "활성 Codex 세션이 없습니다.", message.message_id);
     return;
   }
 
-  if (text === "/sessions") {
+  if (!hasImages && text === "/sessions") {
     await sendMessageWithOptions(sessionsText(), {
       replyTo: message.message_id,
       replyMarkup: sessionsKeyboard(),
@@ -296,17 +380,20 @@ async function handleMessage(message) {
     return;
   }
 
-  if (text === "/pwd") {
+  if (!hasImages && text === "/pwd") {
     await sendMessage(state.workdir || WORKDIR, message.message_id);
     return;
   }
 
-  if (text === "/args") {
-    await sendMessage(CODEX_ARGS.join(" ") || "(none)", message.message_id);
+  if (!hasImages && text === "/args") {
+    await sendMessage([
+      `global: ${CODEX_GLOBAL_ARGS.join(" ") || "(none)"}`,
+      `exec: ${CODEX_ARGS.join(" ") || "(none)"}`,
+    ].join("\n"), message.message_id);
     return;
   }
 
-  if (text.startsWith("/cd ")) {
+  if (!hasImages && text.startsWith("/cd ")) {
     const next = path.resolve(state.workdir || WORKDIR, text.slice(4).trim());
     if (!fs.existsSync(next) || !fs.statSync(next).isDirectory()) {
       await sendMessage(`디렉터리를 찾을 수 없습니다: ${next}`, message.message_id);
@@ -323,9 +410,19 @@ async function handleMessage(message) {
     return;
   }
 
+  let imagePaths = [];
+  try {
+    imagePaths = await downloadMessageImages(message);
+  } catch (error) {
+    await sendMessage(`이미지 다운로드 실패:\n${error.message}`, message.message_id);
+    return;
+  }
+
+  const prompt = buildPrompt(text, imagePaths);
   busy = true;
   currentTask = {
-    prompt: text,
+    prompt,
+    images: imagePaths,
     startedAt: Date.now(),
     session: activeSession(),
     activity: "Codex 시작 중",
@@ -333,9 +430,9 @@ async function handleMessage(message) {
     lastEventAt: Date.now(),
     lastNotifiedActivity: "",
   };
-  await sendMessage("Codex 작업을 시작합니다.", message.message_id);
+  await sendMessage(imagePaths.length ? `이미지 ${imagePaths.length}개를 첨부해 Codex 작업을 시작합니다.` : "Codex 작업을 시작합니다.", message.message_id);
   try {
-    const answer = await runCodex(text);
+    const answer = await runCodex(prompt, imagePaths);
     await sendMessage(answer, message.message_id);
   } catch (error) {
     await sendMessage(`Codex 실행 실패:\n${error.message}`, message.message_id);
@@ -343,6 +440,19 @@ async function handleMessage(message) {
     busy = false;
     currentTask = null;
   }
+}
+
+function buildPrompt(text, imagePaths) {
+  if (!imagePaths.length) {
+    return text;
+  }
+  const lines = [
+    text || "Telegram으로 받은 이미지를 확인하고 답변해 주세요.",
+    "",
+    "첨부 이미지 경로:",
+    ...imagePaths.map((imagePath) => `- ${imagePath}`),
+  ];
+  return lines.join("\n");
 }
 
 function formatStatus(session) {
@@ -486,16 +596,18 @@ function handleCodexEvent(line) {
   return false;
 }
 
-function runCodex(prompt) {
+function runCodex(prompt, imagePaths = []) {
   return new Promise((resolve, reject) => {
     const outputFile = path.join(os.tmpdir(), `telegram-codex-${Date.now()}.txt`);
     const session = activeSession();
-    const args = session
-      ? ["exec", "resume", ...CODEX_ARGS, "--json", "-o", outputFile, session.id]
-      : ["exec", ...CODEX_ARGS, "--json", "-C", state.workdir || WORKDIR, "-o", outputFile];
+    const imageArgs = imagePaths.flatMap((imagePath) => ["--image", imagePath]);
+    const execArgs = [...CODEX_ARGS, "--json", "-o", outputFile, ...imageArgs];
     if (MODEL) {
-      args.push("-m", MODEL);
+      execArgs.push("-m", MODEL);
     }
+    const args = session
+      ? [...CODEX_GLOBAL_ARGS, "exec", "resume", ...execArgs, session.id]
+      : [...CODEX_GLOBAL_ARGS, "exec", ...execArgs, "-C", state.workdir || WORKDIR];
     args.push("-");
 
     const child = spawn("codex", args, {
