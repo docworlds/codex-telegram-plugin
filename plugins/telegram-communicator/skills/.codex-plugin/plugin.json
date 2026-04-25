@@ -1,0 +1,40 @@
+{
+  "name": "telegram-communicator",
+  "version": "0.1.0",
+  "description": "Use Telegram from Codex for notifications, questions, file sharing, and inbound Codex control from Telegram.",
+  "author": {
+    "name": "Local",
+    "url": "https://github.com/qpd-v/mcp-communicator-telegram"
+  },
+  "homepage": "https://www.npmjs.com/package/@mseep/mcp-communicator-telegram",
+  "repository": "https://github.com/qpd-v/mcp-communicator-telegram",
+  "license": "ISC",
+  "keywords": [
+    "telegram",
+    "mcp",
+    "notifications",
+    "chat"
+  ],
+  "mcpServers": "../.mcp.json",
+  "interface": {
+    "displayName": "Telegram Communicator",
+    "shortDescription": "Use Telegram for Codex notifications and remote prompts",
+    "longDescription": "Adds a Telegram MCP server for asking questions, sending notifications, sharing files, and sending project archives, plus an optional local bridge daemon that forwards Telegram messages to Codex exec and returns the result.",
+    "developerName": "Local",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive",
+      "Write"
+    ],
+    "websiteURL": "https://telegram.org/",
+    "privacyPolicyURL": "https://telegram.org/privacy",
+    "termsOfServiceURL": "https://telegram.org/tos",
+    "defaultPrompt": [
+      "Set up Telegram for Codex",
+      "Start the Telegram Codex bridge",
+      "Notify me on Telegram when this task finishes"
+    ],
+    "brandColor": "#229ED9",
+    "screenshots": []
+  }
+}
